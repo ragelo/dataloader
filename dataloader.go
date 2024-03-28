@@ -60,12 +60,16 @@ func NewDataLoader[K string, T any](ctx context.Context, config IDataLoaderConfi
 
 func (d *DataLoader[K, T]) Load(key K) (*T, error) {
 	// Load retrieves a value for a given key.
+	d.lock.RLock()
 	if hit, ok := d.cache[key]; ok && hit.resolved {
 		if hit.err != nil {
+			d.lock.RUnlock()
 			return nil, hit.err
 		}
+		d.lock.RUnlock()
 		return hit.value, nil
 	}
+	d.lock.RUnlock()
 
 	// Lock the cache to ensire only one goroutine is processing given key.
 	hit := d.loadKey(key)

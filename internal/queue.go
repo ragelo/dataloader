@@ -59,19 +59,25 @@ func (q *Queue[K]) Start(ctx context.Context) {
 					q.mut.Unlock()
 
 					go func() {
+						q.mut.RLock()
+						fireAt := time.Duration(q.maxBatchTimeMs) * time.Millisecond
+						q.mut.RUnlock()
 						for {
 							select {
 							case <-ch:
 								return
-							case <-time.After(time.Duration(q.maxBatchTimeMs) * time.Millisecond):
+							case <-time.After(fireAt):
 								// Dispatch the batch if the max wait time is reached
 								q.dispatch()
 							}
 						}
 					}()
 				}
+				q.mut.RLock()
+				shouldTrigger := int32(len(q.keys)) >= q.maxBatchSize
+				q.mut.RUnlock()
 
-				if int32(len(q.keys)) >= q.maxBatchSize {
+				if shouldTrigger {
 					// Dispatch the batch if the max batch size is reached
 					q.dispatch()
 				}
@@ -87,10 +93,13 @@ func (q *Queue[K]) Append(key K) {
 }
 
 func (q *Queue[K]) dispatch() {
+	q.mut.RLock()
 	if len(q.keys) == 0 {
+		q.mut.RUnlock()
 		return
 	}
 
+	q.mut.RUnlock()
 	q.mut.Lock()
 	batchSize := int(math.Min(float64(len(q.keys)), float64(q.maxBatchSize)))
 	keys := make([]K, batchSize)
