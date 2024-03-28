@@ -15,14 +15,17 @@ type UserService struct {
 	users map[string]*User
 }
 
-func NewUserService() *UserService {
-	users := map[string]*User{
+var (
+	_users = map[string]*User{
 		"1": {ID: "1", Name: "User 1"},
 		"2": {ID: "2", Name: "User 2"},
 		"3": {ID: "3", Name: "User 3"},
 	}
+)
+
+func NewUserService() *UserService {
 	return &UserService{
-		users: users,
+		users: _users,
 	}
 }
 

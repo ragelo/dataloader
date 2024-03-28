@@ -10,14 +10,17 @@ type UserFriendsService struct {
 	friends map[string]*[]string
 }
 
-func NewUserFriendsService() *UserFriendsService {
-	friends := map[string]*[]string{
+var (
+	_friends = map[string]*[]string{
 		"1": {"2", "3"},
 		"2": {"1", "3"},
 		"3": {"1", "2"},
 	}
+)
+
+func NewUserFriendsService() *UserFriendsService {
 	return &UserFriendsService{
-		friends: friends,
+		friends: _friends,
 	}
 }
 
