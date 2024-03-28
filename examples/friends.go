@@ -46,7 +46,9 @@ func (c *UserFriendsLoaderConfig) BatchLoad(ctx context.Context, keys *[]string)
 	return c.userFriendsService.GetUserFriendsMap(ctx, keys)
 }
 
-func NewUserFriendsLoader(ctx context.Context) *dl.DataLoader[string, []string] {
+type UserFriendsDataLoader = dl.DataLoader[string, []string]
+
+func NewUserFriendsLoader(ctx context.Context) *UserFriendsDataLoader {
 	config := &UserFriendsLoaderConfig{
 		userFriendsService: NewUserFriendsService(),
 	}

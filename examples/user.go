@@ -59,7 +59,9 @@ func (c *UserDataLoaderConfig) BatchLoad(ctx context.Context, keys *[]string) (m
 	return c.userService.GetUsersMap(ctx, keys)
 }
 
-func NewUserDataLoader(ctx context.Context) *dl.DataLoader[string, User] {
+type UserDataLoader = dl.DataLoader[string, User]
+
+func NewUserDataLoader(ctx context.Context) *UserDataLoader {
 	config := &UserDataLoaderConfig{
 		userService: NewUserService(),
 	}

@@ -20,5 +20,6 @@ func main() {
 		}
 	}()
 
-	ex.Start()
+	ex.Start()        // http://localhost:8080/users
+	ex.StartGraphQL() // http://localhost:8081/graphql
 }
