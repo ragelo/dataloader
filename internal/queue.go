@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-type QueueObject[K string] struct {
+type queueObject[K string] struct {
 	key K
 	ch  chan bool
 }
@@ -19,7 +19,7 @@ type Queue[K string] struct {
 	timeoutCh      chan bool
 	maxBatchSize   int32
 	maxBatchTimeMs int32
-	keys           []*QueueObject[K]
+	keys           []*queueObject[K]
 	keysMap        map[K]bool
 	mut            sync.RWMutex
 }
@@ -30,13 +30,14 @@ func NewQueue[K string](maxBatchSize int32, maxBatchTimeMs int32) *Queue[K] {
 		timeoutCh:      make(chan bool),
 		maxBatchSize:   maxBatchSize,
 		maxBatchTimeMs: maxBatchTimeMs,
-		keys:           make([]*QueueObject[K], 0),
+		keys:           make([]*queueObject[K], 0),
 		keysMap:        make(map[K]bool),
 		BatchChan:      make(chan *[]K),
 	}
 }
 
 func (q *Queue[K]) Start(ctx context.Context) {
+	// Start the queue processing: listen for new keys and dispatch them
 	go func() {
 		for {
 			select {
@@ -53,7 +54,7 @@ func (q *Queue[K]) Start(ctx context.Context) {
 					ch := make(chan bool)
 
 					q.mut.Lock()
-					q.keys = append(q.keys, &QueueObject[K]{key: key, ch: ch})
+					q.keys = append(q.keys, &queueObject[K]{key: key, ch: ch})
 					q.keysMap[key] = true
 					q.mut.Unlock()
 
@@ -63,6 +64,7 @@ func (q *Queue[K]) Start(ctx context.Context) {
 							case <-ch:
 								return
 							case <-time.After(time.Duration(q.maxBatchTimeMs) * time.Millisecond):
+								// Dispatch the batch if the max wait time is reached
 								q.dispatch()
 							}
 						}
@@ -70,6 +72,7 @@ func (q *Queue[K]) Start(ctx context.Context) {
 				}
 
 				if int32(len(q.keys)) >= q.maxBatchSize {
+					// Dispatch the batch if the max batch size is reached
 					q.dispatch()
 				}
 			}
@@ -101,7 +104,7 @@ func (q *Queue[K]) dispatch() {
 	if len(q.keys) > batchSize {
 		q.keys = q.keys[batchSize:]
 	} else {
-		q.keys = make([]*QueueObject[K], 0)
+		q.keys = make([]*queueObject[K], 0)
 	}
 	for _, key := range keys {
 		delete(q.keysMap, key)

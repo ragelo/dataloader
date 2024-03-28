@@ -8,8 +8,8 @@ import (
 )
 
 type IDataLoaderConfig[K string | int, T any] interface {
-	// Batch function that is called with a list of keys. This function should return a list of values in the same order as the keys.
-	// Shoulb be implemented by the user.
+	// Batch function that is called with a list of keys. This function should return a map of values for each passed key.
+	// Should be implemented by the user.
 	BatchLoad(ctx context.Context, keys *[]K) (map[K]*T, error)
 }
 
@@ -22,15 +22,15 @@ type IDataLoader[K string, T any] interface {
 	LoadMany(keys []K) ([]*T, error)
 }
 
-type ResolvedValue[T any] struct {
+type resolvedValue[T any] struct {
 	value *T
 	err   error
 }
 
-type CacheEntity[T any] struct {
+type cacheEntity[T any] struct {
 	value    *T
 	resolved bool
-	ch       chan ResolvedValue[T]
+	ch       chan resolvedValue[T]
 	err      error
 }
 
@@ -38,7 +38,7 @@ type DataLoader[K string, T any] struct {
 	IDataLoader[K, T]
 
 	config IDataLoaderConfig[K, T]
-	cache  map[K]*CacheEntity[T]
+	cache  map[K]*cacheEntity[T]
 
 	queue *dli.Queue[K]
 
@@ -49,7 +49,7 @@ type DataLoader[K string, T any] struct {
 func NewDataLoader[K string, T any](ctx context.Context, config IDataLoaderConfig[K, T], maxBatchSize int32, maxBatchTimeMs int32) *DataLoader[K, T] {
 	loader := &DataLoader[K, T]{
 		config: config,
-		cache:  make(map[K]*CacheEntity[T]),
+		cache:  make(map[K]*cacheEntity[T]),
 		queue:  dli.NewQueue[K](maxBatchSize, maxBatchTimeMs),
 		lock:   sync.RWMutex{},
 		ctx:    ctx,
@@ -58,27 +58,8 @@ func NewDataLoader[K string, T any](ctx context.Context, config IDataLoaderConfi
 	return loader
 }
 
-func (d *DataLoader[K, T]) start(ctx context.Context) {
-	d.queue.Start(ctx)
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case keys := <-d.queue.BatchChan:
-				d.processChunk(keys)
-			}
-		}
-	}()
-}
-
 func (d *DataLoader[K, T]) Load(key K) (*T, error) {
-	// Use batchLoad to load the value for the key.
-	// If the value is not already cached, the loader will call the batch function with a list of keys.
-	// If the value is already cached, the value will be returned.
-	// Batch function should be called every 30 milliseconds or when the batch size reaches 1000.
-
+	// Load retrieves a value for a given key.
 	if hit, ok := d.cache[key]; ok && hit.resolved {
 		if hit.err != nil {
 			return nil, hit.err
@@ -97,21 +78,9 @@ func (d *DataLoader[K, T]) Load(key K) (*T, error) {
 	}
 }
 
-func (d *DataLoader[K, T]) loadKey(key K) *CacheEntity[T] {
-	d.lock.Lock()
-	hit, ok := d.cache[key]
-	if !ok {
-		// If the key is not being processed, create a new channel and submit the key to the processing queue.
-		hit = &CacheEntity[T]{resolved: false, ch: make(chan ResolvedValue[T])}
-		d.cache[key] = hit
-		d.queue.Append(key)
-	}
-	d.lock.Unlock()
-	return hit
-}
-
 func (d *DataLoader[K, T]) LoadMany(keys *[]K) ([]*T, error) {
-	hits := []*CacheEntity[T]{}
+	// LoadMany retrieves multiple values for a given list of keys.
+	hits := []*cacheEntity[T]{}
 	for _, key := range *keys {
 		hits = append(hits, d.loadKey(key))
 	}
@@ -131,7 +100,40 @@ func (d *DataLoader[K, T]) LoadMany(keys *[]K) ([]*T, error) {
 	return values, nil
 }
 
+func (d *DataLoader[K, T]) loadKey(key K) *cacheEntity[T] {
+	// Load the value for the key. If the key is not being processed, create a new channel and submit the key to the processing queue.
+	d.lock.Lock()
+	hit, ok := d.cache[key]
+	if !ok {
+		// If the key is not being processed, create a new channel and submit the key to the processing queue.
+		hit = &cacheEntity[T]{resolved: false, ch: make(chan resolvedValue[T])}
+		d.cache[key] = hit
+		d.queue.Append(key)
+	}
+	d.lock.Unlock()
+	return hit
+}
+
+func (d *DataLoader[K, T]) start(ctx context.Context) {
+	// Start the queue processing loop.
+	d.queue.Start(ctx)
+
+	// Start main processing loop.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case keys := <-d.queue.BatchChan:
+				// Process each new chunk of keys evicted from the queue.
+				d.processChunk(keys)
+			}
+		}
+	}()
+}
+
 func (d *DataLoader[K, T]) processChunk(chunk *[]K) {
+	// Call the batch function with a list of keys. Then resolve the values for each key.
 	values, err := d.config.BatchLoad(d.ctx, chunk)
 	for k, v := range values {
 		d.resolveKey(k, v, err)
@@ -139,10 +141,11 @@ func (d *DataLoader[K, T]) processChunk(chunk *[]K) {
 }
 
 func (d *DataLoader[K, T]) resolveKey(k K, v *T, err error) {
+	// Resolve the value for the key. Writes the value to the cache and closes the channel.
 	d.lock.Lock()
 	c := d.cache[k]
 	if c == nil {
-		c = &CacheEntity[T]{}
+		c = &cacheEntity[T]{}
 		d.cache[k] = c
 	}
 
