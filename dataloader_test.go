@@ -51,8 +51,9 @@ func generateTestUsers() map[string]*user {
 func TestNewDataLoader(t *testing.T) {
 	// Create a new data loader.
 	users := generateTestUsers()
+	ctx, cancel := context.WithCancel(context.Background())
 	c := &userDataLoaderConfig{users: users, calls: 0}
-	dataLoader := NewDataLoader[string, user](context.Background(), c, 2, 20)
+	dataLoader := NewDataLoader[string, user](ctx, c, 2, 20)
 
 	// Load a user by ID (sync)
 	loadedUser, err := dataLoader.Load("0")
@@ -115,4 +116,6 @@ func TestNewDataLoader(t *testing.T) {
 		t.Errorf("Expected calls to be 2, but got %v", c.calls)
 	}
 	c.calls = 0
+
+	cancel()
 }
