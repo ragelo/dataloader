@@ -16,7 +16,6 @@ type Queue[K string] struct {
 	BatchChan chan *[]K
 
 	ch             chan K
-	timeoutCh      chan bool
 	maxBatchSize   int32
 	maxBatchTimeMs int32
 	keys           []*queueObject[K]
@@ -27,7 +26,6 @@ type Queue[K string] struct {
 func NewQueue[K string](maxBatchSize int32, maxBatchTimeMs int32) *Queue[K] {
 	return &Queue[K]{
 		ch:             make(chan K),
-		timeoutCh:      make(chan bool),
 		maxBatchSize:   maxBatchSize,
 		maxBatchTimeMs: maxBatchTimeMs,
 		keys:           make([]*queueObject[K], 0),
@@ -42,45 +40,13 @@ func (q *Queue[K]) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				q.mut.Lock()
+				close(q.ch)
+				close(q.BatchChan)
+				q.mut.Unlock()
 				return
 			case key := <-q.ch:
-				found := false
-				if _, ok := q.keysMap[key]; ok {
-					found = true
-				}
-
-				// if key not on keys, add for processing
-				if !found {
-					ch := make(chan bool)
-
-					q.mut.Lock()
-					q.keys = append(q.keys, &queueObject[K]{key: key, ch: ch})
-					q.keysMap[key] = true
-					q.mut.Unlock()
-
-					go func() {
-						q.mut.RLock()
-						fireAt := time.Duration(q.maxBatchTimeMs) * time.Millisecond
-						q.mut.RUnlock()
-						for {
-							select {
-							case <-ch:
-								return
-							case <-time.After(fireAt):
-								// Dispatch the batch if the max wait time is reached
-								q.dispatch()
-							}
-						}
-					}()
-				}
-				q.mut.RLock()
-				shouldTrigger := int32(len(q.keys)) >= q.maxBatchSize
-				q.mut.RUnlock()
-
-				if shouldTrigger {
-					// Dispatch the batch if the max batch size is reached
-					q.dispatch()
-				}
+				q.handleNewKey(key)
 			}
 		}
 	}()
@@ -90,6 +56,48 @@ func (q *Queue[K]) Append(key K) {
 	go func() {
 		q.ch <- key
 	}()
+}
+
+func (q *Queue[K]) handleNewKey(key K) {
+	q.mut.RLock()
+	found := false
+	if _, ok := q.keysMap[key]; ok {
+		found = true
+	}
+	q.mut.RUnlock()
+
+	// if key not on keys, add for processing
+	if !found {
+		ch := make(chan bool)
+
+		q.mut.Lock()
+		q.keys = append(q.keys, &queueObject[K]{key: key, ch: ch})
+		q.keysMap[key] = true
+		q.mut.Unlock()
+
+		go func() {
+			q.mut.RLock()
+			fireAt := time.Duration(q.maxBatchTimeMs) * time.Millisecond
+			q.mut.RUnlock()
+			for {
+				select {
+				case <-ch:
+					return
+				case <-time.After(fireAt):
+					// Dispatch the batch if the max wait time is reached
+					q.dispatch()
+				}
+			}
+		}()
+	}
+	q.mut.RLock()
+	shouldTrigger := int32(len(q.keys)) >= q.maxBatchSize
+	q.mut.RUnlock()
+
+	if shouldTrigger {
+		// Dispatch the batch if the max batch size is reached
+		q.dispatch()
+	}
 }
 
 func (q *Queue[K]) dispatch() {
