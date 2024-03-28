@@ -17,7 +17,7 @@ func getUsers(c *gin.Context) {
 
 	usersService := NewUserService()
 	userDataLoader := NewUserDataLoader(ctx)
-	userFriendsListDataLoader := NewUserFriendsLoader(ctx)
+	userFriendsListDataLoader := NewUserFriendsDataLoader(ctx)
 
 	users, err := usersService.GetAllUsers(ctx)
 

@@ -12,8 +12,15 @@ type queueObject[K string] struct {
 	ch  chan bool
 }
 
-type queue[K string] struct {
-	BatchChan chan *[]K
+type queueManager[K string] interface {
+	// Append adds a key to the queue.
+	Append(key K)
+	// GetBatchChan returns a channel that will receive a batch of keys when the batch is ready to be processed.
+	GetBatchChan() chan *[]K
+}
+
+type defaultQueueManager[K string] struct {
+	batchChan chan *[]K
 
 	ch             chan K
 	maxBatchSize   int32
@@ -23,18 +30,30 @@ type queue[K string] struct {
 	mut            sync.RWMutex
 }
 
-func newQueue[K string](maxBatchSize int32, maxBatchTimeMs int32) *queue[K] {
-	return &queue[K]{
+func (q *defaultQueueManager[K]) Append(key K) {
+	go func() {
+		q.ch <- key
+	}()
+}
+
+func (q *defaultQueueManager[K]) GetBatchChan() chan *[]K {
+	return q.batchChan
+}
+
+func newDefaultQueueManager[K string](ctx context.Context, maxBatchSize int32, maxBatchTimeMs int32) *defaultQueueManager[K] {
+	qm := &defaultQueueManager[K]{
 		ch:             make(chan K),
 		maxBatchSize:   maxBatchSize,
 		maxBatchTimeMs: maxBatchTimeMs,
 		keys:           make([]*queueObject[K], 0),
 		keysMap:        make(map[K]bool),
-		BatchChan:      make(chan *[]K),
+		batchChan:      make(chan *[]K),
 	}
+	qm.start(ctx)
+	return qm
 }
 
-func (q *queue[K]) Start(ctx context.Context) {
+func (q *defaultQueueManager[K]) start(ctx context.Context) {
 	// Start the queue processing: listen for new keys and dispatch them
 	go func() {
 		for {
@@ -42,7 +61,7 @@ func (q *queue[K]) Start(ctx context.Context) {
 			case <-ctx.Done():
 				q.mut.Lock()
 				close(q.ch)
-				close(q.BatchChan)
+				close(q.batchChan)
 				q.mut.Unlock()
 				return
 			case key := <-q.ch:
@@ -52,13 +71,7 @@ func (q *queue[K]) Start(ctx context.Context) {
 	}()
 }
 
-func (q *queue[K]) Append(key K) {
-	go func() {
-		q.ch <- key
-	}()
-}
-
-func (q *queue[K]) handleNewKey(key K) {
+func (q *defaultQueueManager[K]) handleNewKey(key K) {
 	q.mut.RLock()
 	found := false
 	if _, ok := q.keysMap[key]; ok {
@@ -100,7 +113,7 @@ func (q *queue[K]) handleNewKey(key K) {
 	}
 }
 
-func (q *queue[K]) dispatch() {
+func (q *defaultQueueManager[K]) dispatch() {
 	q.mut.RLock()
 	if len(q.keys) == 0 {
 		q.mut.RUnlock()
@@ -116,7 +129,7 @@ func (q *queue[K]) dispatch() {
 		close(item.ch)
 	}
 
-	q.BatchChan <- &keys
+	q.batchChan <- &keys
 
 	if len(q.keys) > batchSize {
 		q.keys = q.keys[batchSize:]

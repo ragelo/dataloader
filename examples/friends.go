@@ -36,21 +36,19 @@ func (s *UserFriendsService) GetUserFriendsMap(ctx context.Context, user_ids *[]
 	return result, nil
 }
 
-type UserFriendsLoaderConfig struct {
-	dl.IDataLoaderConfig[string, []string]
-
+type UserFriendsBatchLoader struct {
 	userFriendsService *UserFriendsService
 }
 
-func (c *UserFriendsLoaderConfig) BatchLoad(ctx context.Context, keys *[]string) (map[string]*[]string, error) {
+func (c *UserFriendsBatchLoader) BatchLoad(ctx context.Context, keys *[]string) (map[string]*[]string, error) {
 	return c.userFriendsService.GetUserFriendsMap(ctx, keys)
 }
 
 type UserFriendsDataLoader = dl.DataLoader[string, []string]
 
-func NewUserFriendsLoader(ctx context.Context) *UserFriendsDataLoader {
-	config := &UserFriendsLoaderConfig{
+func NewUserFriendsDataLoader(ctx context.Context) *UserFriendsDataLoader {
+	batchLoader := &UserFriendsBatchLoader{
 		userFriendsService: NewUserFriendsService(),
 	}
-	return dl.NewDataLoader[string, []string](ctx, config, 10 /* max 10 items per match */, 5 /* max 5ms batching window */)
+	return dl.NewDataLoader[string, []string](ctx, batchLoader, 10 /* max 10 items per match */, 5 /* max 5ms batching window */)
 }

@@ -13,15 +13,12 @@ type user struct {
 	Name string
 }
 
-type userDataLoaderConfig struct {
-	IDataLoaderConfig[string, user]
-
+type userBatchLoader struct {
 	users map[string]*user
-
 	calls int
 }
 
-func (c *userDataLoaderConfig) BatchLoad(ctx context.Context, keys *[]string) (map[string]*user, error) {
+func (c *userBatchLoader) BatchLoad(ctx context.Context, keys *[]string) (map[string]*user, error) {
 	users := make(map[string]*user)
 	for _, key := range *keys {
 		if user, ok := c.users[key]; ok {
@@ -52,7 +49,7 @@ func TestNewDataLoader(t *testing.T) {
 	// Create a new data loader.
 	users := generateTestUsers()
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &userDataLoaderConfig{users: users, calls: 0}
+	c := &userBatchLoader{users: users, calls: 0}
 	dataLoader := NewDataLoader[string, user](ctx, c, 2, 20)
 
 	// Load a user by ID (sync)

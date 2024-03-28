@@ -122,7 +122,7 @@ func StartGraphQL() {
 				},
 				"loaders": &Loaders{
 					UserDataLoader:        NewUserDataLoader(ctx),
-					UserFriendsDataLoader: NewUserFriendsLoader(ctx),
+					UserFriendsDataLoader: NewUserFriendsDataLoader(ctx),
 				},
 			}
 		},

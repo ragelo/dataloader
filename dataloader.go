@@ -5,19 +5,10 @@ import (
 	"sync"
 )
 
-type IDataLoaderConfig[K string | int, T any] interface {
+type BatchLoader[K string | int, T any] interface {
 	// Batch function that is called with a list of keys. This function should return a map of values for each passed key.
 	// Should be implemented by the user.
 	BatchLoad(ctx context.Context, keys *[]K) (map[K]*T, error)
-}
-
-// IDataLoader abstract class that batches multiple requests into a single database request.
-// IDataLoader is a generic utility to be used in a GraphQL server to batch and cache requests to a backend database.
-type IDataLoader[K string, T any] interface {
-	// Load retrieves a value for a given key. If the value is not already cached, the loader will call the batch function with a list of keys.
-	Load(key K) (*T, error)
-	// LoadMany retrieves multiple values for a given list of keys. For each key that is not already cached, a single loader call will be scheduled.
-	LoadMany(keys []K) ([]*T, error)
 }
 
 type resolvedValue[T any] struct {
@@ -33,29 +24,27 @@ type cacheEntity[T any] struct {
 }
 
 type DataLoader[K string, T any] struct {
-	IDataLoader[K, T]
+	batchLoader  BatchLoader[K, T]
+	queueManager queueManager[K]
 
-	config IDataLoaderConfig[K, T]
-	cache  map[K]*cacheEntity[T]
-
-	queue *queue[K]
-
-	lock sync.RWMutex
-	ctx  context.Context
+	cache map[K]*cacheEntity[T]
+	lock  sync.RWMutex
+	ctx   context.Context
 }
 
-func NewDataLoader[K string, T any](ctx context.Context, config IDataLoaderConfig[K, T], maxBatchSize int32, maxBatchTimeMs int32) *DataLoader[K, T] {
+func NewDataLoader[K string, T any](ctx context.Context, batchLoader BatchLoader[K, T], maxBatchSize int32, maxBatchTimeMs int32) *DataLoader[K, T] {
 	loader := &DataLoader[K, T]{
-		config: config,
-		cache:  make(map[K]*cacheEntity[T]),
-		queue:  newQueue[K](maxBatchSize, maxBatchTimeMs),
-		lock:   sync.RWMutex{},
-		ctx:    ctx,
+		batchLoader:  batchLoader,
+		cache:        make(map[K]*cacheEntity[T]),
+		queueManager: newDefaultQueueManager[K](ctx, maxBatchSize, maxBatchTimeMs),
+		lock:         sync.RWMutex{},
+		ctx:          ctx,
 	}
 	loader.start(ctx)
 	return loader
 }
 
+// Load retrieves a value for a given key. If the value is not already cached, the loader will call the batch function with a list of keys.
 func (d *DataLoader[K, T]) Load(key K) (*T, error) {
 	// Load retrieves a value for a given key.
 	d.lock.RLock()
@@ -80,6 +69,7 @@ func (d *DataLoader[K, T]) Load(key K) (*T, error) {
 	}
 }
 
+// LoadMany retrieves multiple values for a given list of keys. For each key that is not already cached, a single loader call will be scheduled.
 func (d *DataLoader[K, T]) LoadMany(keys *[]K) ([]*T, error) {
 	// LoadMany retrieves multiple values for a given list of keys.
 	hits := []*cacheEntity[T]{}
@@ -110,23 +100,21 @@ func (d *DataLoader[K, T]) loadKey(key K) *cacheEntity[T] {
 		// If the key is not being processed, create a new channel and submit the key to the processing queue.
 		hit = &cacheEntity[T]{resolved: false, ch: make(chan resolvedValue[T])}
 		d.cache[key] = hit
-		d.queue.Append(key)
+		d.queueManager.Append(key)
 	}
 	d.lock.Unlock()
 	return hit
 }
 
 func (d *DataLoader[K, T]) start(ctx context.Context) {
-	// Start the queue processing loop.
-	d.queue.Start(ctx)
-
 	// Start main processing loop.
 	go func() {
+		batchChunkChannel := d.queueManager.GetBatchChan()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case keys := <-d.queue.BatchChan:
+			case keys := <-batchChunkChannel:
 				// Process each new chunk of keys evicted from the queue.
 				d.processChunk(keys)
 			}
@@ -136,7 +124,7 @@ func (d *DataLoader[K, T]) start(ctx context.Context) {
 
 func (d *DataLoader[K, T]) processChunk(chunk *[]K) {
 	// Call the batch function with a list of keys. Then resolve the values for each key.
-	values, err := d.config.BatchLoad(d.ctx, chunk)
+	values, err := d.batchLoader.BatchLoad(d.ctx, chunk)
 	for k, v := range values {
 		d.resolveKey(k, v, err)
 	}

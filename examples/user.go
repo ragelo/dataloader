@@ -49,21 +49,19 @@ func (s *UserService) GetAllUsers(ctx context.Context) ([]*User, error) {
 	return result, nil
 }
 
-type UserDataLoaderConfig struct {
-	dl.IDataLoaderConfig[string, User]
-
+type UserBatchLoader struct {
 	userService *UserService
 }
 
-func (c *UserDataLoaderConfig) BatchLoad(ctx context.Context, keys *[]string) (map[string]*User, error) {
+func (c *UserBatchLoader) BatchLoad(ctx context.Context, keys *[]string) (map[string]*User, error) {
 	return c.userService.GetUsersMap(ctx, keys)
 }
 
 type UserDataLoader = dl.DataLoader[string, User]
 
 func NewUserDataLoader(ctx context.Context) *UserDataLoader {
-	config := &UserDataLoaderConfig{
+	batchLoader := &UserBatchLoader{
 		userService: NewUserService(),
 	}
-	return dl.NewDataLoader[string, User](ctx, config, 10 /* max 10 items per match */, 5 /* max 5ms batching window */)
+	return dl.NewDataLoader[string, User](ctx, batchLoader, 10 /* max 10 items per match */, 5 /* max 5ms batching window */)
 }
