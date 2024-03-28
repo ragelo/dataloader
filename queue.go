@@ -1,4 +1,4 @@
-package internal
+package dataloader
 
 import (
 	"context"
@@ -12,7 +12,7 @@ type queueObject[K string] struct {
 	ch  chan bool
 }
 
-type Queue[K string] struct {
+type queue[K string] struct {
 	BatchChan chan *[]K
 
 	ch             chan K
@@ -23,8 +23,8 @@ type Queue[K string] struct {
 	mut            sync.RWMutex
 }
 
-func NewQueue[K string](maxBatchSize int32, maxBatchTimeMs int32) *Queue[K] {
-	return &Queue[K]{
+func newQueue[K string](maxBatchSize int32, maxBatchTimeMs int32) *queue[K] {
+	return &queue[K]{
 		ch:             make(chan K),
 		maxBatchSize:   maxBatchSize,
 		maxBatchTimeMs: maxBatchTimeMs,
@@ -34,7 +34,7 @@ func NewQueue[K string](maxBatchSize int32, maxBatchTimeMs int32) *Queue[K] {
 	}
 }
 
-func (q *Queue[K]) Start(ctx context.Context) {
+func (q *queue[K]) Start(ctx context.Context) {
 	// Start the queue processing: listen for new keys and dispatch them
 	go func() {
 		for {
@@ -52,13 +52,13 @@ func (q *Queue[K]) Start(ctx context.Context) {
 	}()
 }
 
-func (q *Queue[K]) Append(key K) {
+func (q *queue[K]) Append(key K) {
 	go func() {
 		q.ch <- key
 	}()
 }
 
-func (q *Queue[K]) handleNewKey(key K) {
+func (q *queue[K]) handleNewKey(key K) {
 	q.mut.RLock()
 	found := false
 	if _, ok := q.keysMap[key]; ok {
@@ -100,7 +100,7 @@ func (q *Queue[K]) handleNewKey(key K) {
 	}
 }
 
-func (q *Queue[K]) dispatch() {
+func (q *queue[K]) dispatch() {
 	q.mut.RLock()
 	if len(q.keys) == 0 {
 		q.mut.RUnlock()

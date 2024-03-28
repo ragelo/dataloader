@@ -3,8 +3,6 @@ package dataloader
 import (
 	"context"
 	"sync"
-
-	dli "github.com/ragelo/dataloader/internal"
 )
 
 type IDataLoaderConfig[K string | int, T any] interface {
@@ -40,7 +38,7 @@ type DataLoader[K string, T any] struct {
 	config IDataLoaderConfig[K, T]
 	cache  map[K]*cacheEntity[T]
 
-	queue *dli.Queue[K]
+	queue *queue[K]
 
 	lock sync.RWMutex
 	ctx  context.Context
@@ -50,7 +48,7 @@ func NewDataLoader[K string, T any](ctx context.Context, config IDataLoaderConfi
 	loader := &DataLoader[K, T]{
 		config: config,
 		cache:  make(map[K]*cacheEntity[T]),
-		queue:  dli.NewQueue[K](maxBatchSize, maxBatchTimeMs),
+		queue:  newQueue[K](maxBatchSize, maxBatchTimeMs),
 		lock:   sync.RWMutex{},
 		ctx:    ctx,
 	}
